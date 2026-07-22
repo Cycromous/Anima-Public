@@ -79,7 +79,7 @@ def init_graph_db():
                   active_lobe TEXT,
                   prompt_snippet TEXT)''')
                   
-    # NEW: Executive Goal Stack
+    # Executive Goal Stack
     conn.execute('''CREATE TABLE IF NOT EXISTS goal_stack
                  (goal_id TEXT PRIMARY KEY,
                   parent_id TEXT,
@@ -138,7 +138,7 @@ def get_lobe_error_penalty(lobe_name):
     except Exception:
         return 0.0
 
-# NEW: Fetch Active Goals
+# Fetch Active Goals
 def get_active_goals_from_db(limit=3):
     """Retrieves the highest priority goals that are currently in progress."""
     try:
@@ -240,7 +240,7 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
     """Pulls memories using In-Memory Graph Expansion and adaptive cognitive weights."""
     global nlp
     
-    # --- 1. SEED ENTITY EXTRACTION ---
+    # 1. SEED ENTITY EXTRACTION
     seed_entities = []
     if nlp is not None:
         doc = nlp(user_input.lower())
@@ -249,7 +249,7 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
         if not seed_entities:
             seed_entities = [token.lemma_ for token in doc if token.pos_ in ("NOUN", "PROPN") and not token.is_stop]
             
-    # --- 2. RAM GRAPH EXPANSION ---
+    # 2. RAM GRAPH EXPANSION
     associated_concepts = get_associated_concepts(seed_entities, depth=2)
     expanded_query = user_input
     
@@ -258,7 +258,7 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
         expanded_query = user_input + " " + " ".join(associated_concepts[:5])
         print(f" -> [GRAPH EXPANSION] Seed '{seed_entities}' activated: {associated_concepts[:5]}")
 
-    # --- 3. SEMANTIC SEARCH (Single Hop) ---
+    # 3. SEMANTIC SEARCH (Single Hop)
     results = collection.query(
         query_texts=[expanded_query],
         n_results=20
@@ -272,7 +272,7 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
     all_ids = results['ids'][0]
     all_distances = results['distances'][0]
 
-    # --- 4. COGNITIVE SCORING ---
+    # 4. COGNITIVE SCORING
     scored_memories = []
     for i in range(len(all_docs)):
         mem_id = all_ids[i]
@@ -307,11 +307,10 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
             "metadata": meta
         })
 
-    # Sort and slice
     scored_memories.sort(key=lambda x: x["score"], reverse=True)
     best_memories = scored_memories[:top_k]
 
-    # --- 5. CROSS-ENCODER RERANKING ---
+    #  5. CROSS-ENCODER RERANKING
     if best_memories:
         if not hasattr(retrieve_weighted_memories, "reranker"):
             print(" -> [MEMORY] Loading Cross-Encoder Reranker into CPU RAM...")
@@ -330,7 +329,7 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
             mem_class = meta.get("memory_class", meta.get("memory_type", "")).lower()
             is_verified = meta.get("verified", False)
 
-            # --- HIERARCHY OF TRUTH (Additive Logit Adjustments) ---
+            # HIERARCHY OF TRUTH (Additive Logit Adjustments)
             if mem_class == "semantic":
                 # Massive +5.0 boost to hard facts. They will always dominate the top slot.
                 mem["rerank_score"] = base_rerank_score + 5.0 
@@ -342,18 +341,15 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
             else:
                 # Verified episodic memories or other types retain standard scoring
                 mem["rerank_score"] = base_rerank_score
-            # -------------------------------------------------------
-                
+
         best_memories.sort(key=lambda x: x["rerank_score"], reverse=True)
         top_score = best_memories[0]['rerank_score']
         print(f" -> [MEMORY] Rerank complete. Top memory confidence: {top_score:.4f}")
 
-# Format the memory payload to expose provenance as structured JSON
     structured_memories = []
     for m in best_memories:
         meta = m['metadata']
-        
-        # Build a structured dictionary for each memory
+
         structured_memories.append({
             "memory_class": meta.get('memory_class', 'unknown').upper(),
             "source_modality": meta.get('source_modality', 'unknown'),
@@ -362,7 +358,6 @@ def retrieve_weighted_memories(user_input, collection, top_k=5):
             "content": m['text']
         })
 
-    # Convert the list of dictionaries into a formatted JSON string
     formatted_memory_text = json.dumps(structured_memories, indent=2)
     
     return formatted_memory_text, best_memories
@@ -425,32 +420,29 @@ def extract_entity_tags(text):
     
     return ", ".join(list(set(tags))[:3])
 
-# --- IMPORTANCE SCORING ---
+# IMPORTANCE SCORING
 def score_memory_importance(text):
     score = 5  # baseline
     
-    # Technical content is more important
     technical_keywords = [
         "error", "fix", "bug", "thesis", "project", "esp32", 
         "lora", "model", "train", "code", "crash", "python", "script"
     ]
     score += sum(1 for kw in technical_keywords if kw in text.lower())
     
-    # Longer more detailed memories are more important
     word_count = len(text.split())
     if word_count > 100:
         score += 2
     elif word_count > 50:
         score += 1
-        
-    # Questions or overrides usually indicate high-priority human feedback
+
     if "?" in text or "User Correction" in text:
         score += 2
         
     return min(score, 10)  # cap at 10
 
 
-# --- EPISODIC TIMELINE ---
+# EPISODIC TIMELINE
 def store_episode(user_input, collection):
     event_doc = {
         "type": "episode",
@@ -497,10 +489,8 @@ def extract_relationships(text):
         rebel_model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         
     try:
-        # Prepare inputs for the transformer
         inputs = rebel_tokenizer(text, return_tensors="pt", truncation=True, max_length=256)
-        
-        # Generate tokens with the specific decoder start token REBEL expects
+
         gen_tokens = rebel_model.generate(
             **inputs, 
             max_length=256, 
@@ -508,10 +498,8 @@ def extract_relationships(text):
             num_beams=3 # Using beams improves relationship accuracy
         )
         
-        # Decode output including the special relational triplets
         output = rebel_tokenizer.batch_decode(gen_tokens, skip_special_tokens=False)[0]
-        
-        # Parse the raw <triplet> <subj> <obj> string into a list of dicts
+
         relationships = parse_rebel_output(output)
         
         if relationships:
@@ -532,7 +520,6 @@ def reflect_and_extract_schema(user_input, past_memories, model, tokenizer):
         return user_input
 
 def evaluate_memory_conflict(new_fact, collection):
-    # Query for the closest existing memory
     results = collection.query(query_texts=[new_fact], n_results=1)
     
     if not results["distances"] or not results["distances"][0]:
@@ -540,12 +527,9 @@ def evaluate_memory_conflict(new_fact, collection):
         
     distance = results["distances"][0][0]
     
-    # These thresholds are deterministic, no LLM needed
     if distance < 0.05:
-        # Nearly identical — don't duplicate
         return {"action": "reject_new"}
     elif distance < 0.20:
-        # Very similar — likely an update to existing fact
         return {"action": "overwrite"}
     else:
         # Different enough to coexist
@@ -556,11 +540,11 @@ def process_cognitive_loop(user_input, past_memories, collection, model, tokeniz
     """The Master function that runs the 3-Layer Memory logic."""
     print("\n[COGNITIVE LOOP STARTED]")
 
-    # --- LAYER 2: EPISODIC MEMORY (EVENTS) ---
+    #  LAYER 2: EPISODIC MEMORY (EVENTS)
     store_episode(user_input, collection)
     print("   -> [Layer 2] Episodic timeline updated.")
 
-# --- RELATIONSHIP EXTRACTION (Logical Upgrade) ---
+#  RELATIONSHIP EXTRACTION (Logical Upgrade) 
     relationships = extract_relationships(user_input)
     if relationships:
         print(f"  -> Extracted {len(relationships)} logical relationships.")
@@ -576,11 +560,10 @@ def process_cognitive_loop(user_input, past_memories, collection, model, tokeniz
             if source and target:
                 triple_tuples.append((source, relation, target, confidence))
                 
-        # Send to the centralized graph manager (which now handles conflict detection)
         if triple_tuples:
             add_memory_synapses_batch(triple_tuples)
 
-    # --- LAYER 3: SEMANTIC MEMORY (FACTS) ---
+    #  LAYER 3: SEMANTIC MEMORY (FACTS) 
     # This one STILL needs model/tokenizer because it extracts the initial schema via LLM
     new_fact = reflect_and_extract_schema(user_input, past_memories, model, tokenizer)
     print(f"   -> [Layer 3] Extracted Semantic Fact: {new_fact}")
@@ -594,22 +577,21 @@ def process_cognitive_loop(user_input, past_memories, collection, model, tokeniz
         print("[COGNITIVE LOOP ENDED]\n")
         return
 
-    # --- ENTITY EXTRACTION (Deterministic) ---
+    #  ENTITY EXTRACTION (Deterministic) 
     tags_string = extract_entity_tags(new_fact) # Removed model, tokenizer
     if tags_string:
         print(f"   -> [Entity Indexer] Tagged memory with: [{tags_string}]")
 
-    # --- IMPORTANCE SCORING (Deterministic) ---
+    #  IMPORTANCE SCORING (Deterministic) 
     importance = score_memory_importance(new_fact) # Removed model, tokenizer
     print(f"   -> Importance Score: {importance}/10")
 
-    # --- CONFLICT CHECK (Deterministic Vector Math) ---
+    #  CONFLICT CHECK (Deterministic Vector Math) 
     # Passed 'collection' instead of 'past_memories', removed model/tokenizer
     decision = evaluate_memory_conflict(new_fact, collection) 
     action = decision.get("action", "keep_both")
     print(f"   -> Category: {decision.get('category', 'Vector Match')} | Action: {action}")
 
-    # Added the tags string to the metadata payload
     fact_metadata = {
         "memory_class": "semantic",
         "source_modality": "inferred_schema",
@@ -643,8 +625,7 @@ def process_cognitive_loop(user_input, past_memories, collection, model, tokeniz
 def form_schemas(collection, model, tokenizer, threshold=5):
     """Detects patterns across related memories and abstracts them into general schemas."""
     print(" -> [SCHEMA ENGINE] Scanning for memory patterns...")
-    
-    # Pull only declarative facts
+
     all_semantic = collection.get(where={"memory_type": "semantic"})
     
     if not all_semantic or not all_semantic.get("ids"):
@@ -652,8 +633,7 @@ def form_schemas(collection, model, tokenizer, threshold=5):
         return
 
     tag_groups = {}
-    
-    # Group memories by their entity tags
+
     for i, meta in enumerate(all_semantic["metadatas"]):
         if not meta: continue
         tags_str = meta.get("tags", "")
@@ -673,12 +653,10 @@ def form_schemas(collection, model, tokenizer, threshold=5):
     for tag, memories in tag_groups.items():
         # Filter for quality: Only abstract from high-confidence memories
         reliable = [m for m in memories if m["confidence"] >= 0.6]
-        
-        # Does this concept meet the evidence threshold?
+
         if len(reliable) < threshold:
             continue
-            
-        # Check if we already formed a schema for this tag so we don't duplicate
+
         existing = collection.get(where={"$and": [{"memory_type": "schema"}, {"tags": tag}]})
         if existing and existing.get("ids"):
             continue 
@@ -699,8 +677,7 @@ def form_schemas(collection, model, tokenizer, threshold=5):
         
         if "NO_SCHEMA" in schema_text or not schema_text.strip():
             continue
-            
-        # The schema's confidence scales with the amount of evidence backing it
+
         schema_confidence = min(0.5 + (len(reliable) * 0.05), 0.95)
         
         collection.add(
@@ -721,14 +698,12 @@ def form_schemas(collection, model, tokenizer, threshold=5):
     if schemas_formed == 0:
         print("    -> No new schemas reached the evidence threshold today.")
 
-# Update the signature to accept model and tokenizer
 def consolidate_memories(collection, model=None, tokenizer=None):
     """Runs periodically — strengthens frequently used memories, fades unused ones."""
     print("\n[SYSTEM BOOT] Initiating memory consolidation (Sleep Cycle)...")
     
     all_memories = collection.get()
-    
-    # Safety check in case the database is completely empty
+
     if not all_memories or not all_memories.get("ids"):
         print("    -> No memories to consolidate yet.")
         return
@@ -753,14 +728,12 @@ def consolidate_memories(collection, model=None, tokenizer=None):
         new_importance = importance
         new_confidence = confidence
         needs_update = False
-        
-        # Hebbian strengthening: Used memories get stronger
+
         if usage_count > 5:
             new_importance = min(importance + 1, 10)
             new_confidence = min(confidence + 0.1, 1.0)
             needs_update = True
-            
-        # Ebbinghaus decay: Unused, old memories fade
+
         elif usage_count == 0 and age_days > 30:
             new_importance = max(importance - 1, 1)
             new_confidence = max(confidence - 0.1, 0.1)
@@ -774,10 +747,9 @@ def consolidate_memories(collection, model=None, tokenizer=None):
             updated_count += 1
             
     print(f"    -> Consolidation complete. {updated_count} neural weights updated.\n")
-    
-    # --- NEW: Run Schema Formation ---
+
     if model and tokenizer:
         form_schemas(collection, model, tokenizer)
     else:
         print(" -> [SCHEMA ENGINE] Skipped. Model not loaded into context.")
-    print("") # Formatting newline
+    print("")

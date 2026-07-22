@@ -27,9 +27,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Mute Hugging Face transformers warnings (only show actual errors)
 logging.set_verbosity_error()
 
-# ==========================================
-# --- MODULAR ARCHITECTURE SWITCHBOARD ---
-# ==========================================
+# MODULAR ARCHITECTURE SWITCHBOARD
 ARCHITECTURE_MODE = "NATIVE_4B"
 
 if ARCHITECTURE_MODE == "NATIVE_4B":
@@ -87,7 +85,6 @@ if ARCHITECTURE_MODE == "NATIVE_4B":
         bnb_4bit_compute_dtype=torch.bfloat16,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4"
-        # We completely removed the CPU offload line! It will all fit on the GPU now.
     )
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True)
@@ -114,7 +111,6 @@ def requires_calculation(prompt, classifier_pipeline=None):
         r"\bdivide\b", r"\bsubtract\b"
     ]
     
-    # Require a digit somewhere in the prompt for conversational math words
     numeric_context_patterns = [
         r"\bhow much\b.*\d", r"\bhow many\b.*\d", 
         r"\btotal\b.*\d", r"\bsum\b.*\d",
@@ -128,21 +124,18 @@ def requires_calculation(prompt, classifier_pipeline=None):
         if re.search(pattern, prompt_lower): return True
             
     # 2. NUMERIC HEURISTIC
-    # If the prompt contains math operators paired with numbers (e.g., "5 + 5" or "10% of")
     if re.search(r'\d+\s*[\+\-\*\/%]\s*\d+', prompt_lower) or "% of" in prompt_lower:
         return True
 
     # 3. SEMANTIC FALLBACK (Using your existing BART zero-shot pipeline)
-    # If regex fails, but it still smells like math, let the lightweight system classifier decide.
     if classifier_pipeline:
         candidate_labels = ["mathematical calculation", "general factual question"]
         try:
             result = classifier_pipeline(prompt, candidate_labels)
-            # If the top label is math and confidence is solid, route to Math Brain
             if result['labels'][0] == "mathematical calculation" and result['scores'][0] > 0.65:
                 return True
         except Exception:
-            pass # Failsafe: if BART crashes, default to False
+            pass
 
     return False  
 
@@ -158,10 +151,9 @@ def delayed_sleep_cycle():
     consolidate_memories(collection, model, tokenizer)
 
 print(" -> [SYSTEM BOOT] Launching Sleep Cycle in background thread...")
-# Run the consolidation and schema extraction in the background
 sleep_thread = threading.Thread(
     target=delayed_sleep_cycle,
-    daemon=True # Ensures this background process dies safely if you close the app
+    daemon=True
 )
 sleep_thread.start()
 
@@ -175,12 +167,10 @@ def get_deterministic_intent(user_input):
     
     routing_rules = {
         "CODE_BRAIN": [
-            # Claude's proximity regex merged into the matrix!
             r"\b(need|build|create|make|write|generate|code)\b.{0,30}\b(tool|script|app|database|python|skill)\b",
             r"\b(fix|debug|repair|solve)\b.*\b(code|error|bug|traceback)\b"
         ],
         "DATABASE_INTENT": [
-            # Now catches "details on the case", "info about smith", "find the client", etc.
             r"\b(find|search|lookup|pull|open|details|info|tell|who|give|show|get|what)\b.*\b(client|file|record|case|smith|griffin|name)\b"
         ]
     }
@@ -282,8 +272,6 @@ def deliberate_and_execute(user_input, system_rules, model, tokenizer):
         
         Output ONLY the JSON.
         """
-        
-        # Poll the base model
         response = ask_gemma_internal(prompt, model, tokenizer)
         
         try:
@@ -316,7 +304,6 @@ def deliberate_and_execute(user_input, system_rules, model, tokenizer):
 def route_intent(user_input, has_image, model, tokenizer):
     lower_input = user_input.lower()
     
-    # FAILSAFE INITIALIZATION (Placed at the start to clean the slate for the NEW turn)
     synthesized_context = ""
     past_memories_list = []
     past_memories = ""
@@ -330,13 +317,13 @@ def route_intent(user_input, has_image, model, tokenizer):
     if any(trigger in lower_input for trigger in memory_triggers):
         return "CHAT_BRAIN"
     
-    # --- PRIORITY 1: THE DETERMINISTIC MATRIX ---
+    # PRIORITY 1: THE DETERMINISTIC MATRIX 
     matrix_intent = get_deterministic_intent(user_input)
     if matrix_intent != "UNKNOWN":
         print(f"\n[ROUTER] Deterministic matrix match. Forcing {matrix_intent}.")
         return matrix_intent
     
-    # PRIORITY 2.5: Logical Deduction & Conversation
+    # PRIORITY 2: Logical Deduction & Conversation
     logic_triggers = [
         "is this going to work", "will this work", "is this connection",
         "does this mean", "should i", "can i", "what do you think",
@@ -353,11 +340,8 @@ def route_intent(user_input, has_image, model, tokenizer):
 
 # --- PROBABILISTIC ROUTING (BART) ---
     global intent_classifier
-    
-    # --- THE FIX: Initialize failsafe defaults ---
     top_label = "UNKNOWN"
     top_score = 0.0  
-    # ---------------------------------------------
 
     if intent_classifier is not None:
         print("\n[ROUTER] Intent ambiguous. BART classifying...")
@@ -370,7 +354,7 @@ def route_intent(user_input, has_image, model, tokenizer):
         top_label = result["labels"][0]
         top_score = result["scores"][0]
 
-    # PROBABILISTIC FALLBACK (LOWERED TO 0.55 THRESHOLD)
+    # PROBABILISTIC FALLBACK
     if top_score < 0.55:
         print(f"\n[ROUTER] BART confidence too low ({top_score:.2f}). Defaulting to CHAT_BRAIN.")
         return "CHAT_BRAIN"
@@ -485,7 +469,6 @@ def simulate_outcomes(problem, past_memories, skill_registry, active_goals, mode
     if any(t in lower_p for t in learning_triggers):
         return [{"approach": "Declarative Learning: Purely store information in long-term memory.", "confidence": 1.0, "source": "memory_system"}]
 
-    # --- CLAUDE'S FIX 1: FACTUAL RECALL DETECTION (Heuristic Bypass) ---
     factual_starters = ["what", "how many", "how much", "who", "when", 
                         "where", "which", "tell me", "do you remember",
                         "what do you know"]
@@ -502,10 +485,8 @@ def simulate_outcomes(problem, past_memories, skill_registry, active_goals, mode
 # Grab the intent classifier safely to check for math
     classifier = globals().get('intent_classifier')
     
-    # THE FIX: Use 'problem' here, not 'current_prompt'!
     is_math = requires_calculation(problem, classifier)
 
-    # THE FIX: Add "and not is_math" to the conditions!
     if is_factual_question and has_memories and not wants_code and not is_math:
         print("\n[WORLD MODEL] Factual query + memories detected. Forcing memory recall. Skipping simulation.")
         return [{"approach": "Direct Memory Recall: Apply solution from past experience.", "confidence": 1.0, "source": "memory"}]
@@ -518,9 +499,9 @@ def simulate_outcomes(problem, past_memories, skill_registry, active_goals, mode
         name for name in skill_registry.keys()
         if any(word.lower() in problem.lower() for word in name.lower().split("_") if len(word) > 4 and word.lower() not in SKILL_STOPWORDS)
     ]
-    tool_target = matching_skills[0] if matching_skills else "None"
+    tool_target = matching_skills[0] if matching_skills else "None'
     
-    # 2.5 The Semantic Efficiency Gate (Defense in Depth)
+    # 2.5 The Semantic Efficiency Gate
     global intent_classifier
     if intent_classifier is not None:
         gate_result = intent_classifier(
@@ -540,7 +521,7 @@ def simulate_outcomes(problem, past_memories, skill_registry, active_goals, mode
                 options.append({"approach": "Reason from first principles and step-by-step logic.", "confidence": 0.85, "source": "base_reasoning"})
             return options
 
-    # 3. INTRINSIC GOAL FORMATTING (Your custom system!)
+    # 3. INTRINSIC GOAL FORMATTING
     goal_context = ""
     if active_goals:
         goal_context = "INTRINSIC SYSTEM GOALS:\n"
@@ -594,7 +575,6 @@ def simulate_outcomes(problem, past_memories, skill_registry, active_goals, mode
         print(f"\n[SIMULATOR ERROR] World Model failed to generate scores. Error: {e}")
         print("   -> [INTRINSIC REASONING] Falling back to neutral baseline. Deferring to standard Router.")
         
-        # --- THE TRUE NEUTRAL FALLBACK ---
         simulated_scores = {
             "tool_execution": 0.0,
             "tool_creation": 0.0,
@@ -624,26 +604,19 @@ def pick_best_option(options):
 def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None):
     global code_model, code_tokenizer, model, tokenizer, intent_classifier
     
-    # ==========================================
-    # WORKING MEMORY LIMIT (Sliding Window)
-    # ==========================================
     if len(chat_history) > 4:
         working_history = chat_history[-10:]
         print(f" -> [PREFRONTAL CORTEX] Chat history truncated. Retaining last {len(working_history)} messages.")
     else:
         working_history = chat_history
 
-    # ==========================================
     # 1. FAILSAFE INITIALIZATION & AMNESIA PROTOCOL
-    # ==========================================
-    # Wipes state clean and guarantees variables exist even if routed early
     synthesized_context = ""
     past_memories = ""
     past_memories_list = []
     is_factual_recall = False
     top_intent = ""
     
-    # Global Routing Defaults (Prevents UnboundLocalError)
     active_brain = "CHAT_BRAIN"
     best_option = {
         "approach": "Default Chat Routing (or Teaching Phase)", 
@@ -651,9 +624,7 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         "source": "CHAT_BRAIN"
     }
 
-    # ==========================================
-    # 2. CHIT-CHAT BYPASS (Reflex Arc)
-    # ==========================================
+    # 2. CHIT-CHAT BYPASS
     chit_chat_triggers = ["hi", "hello", "hey", "good morning", "how are you", "what's up"]
     if user_input.strip().lower() in chit_chat_triggers:
         reply = "Hello I am Anima, how can I assist you today?"
@@ -666,22 +637,17 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         reply = "[SYSTEM] Launching interactive memory visualizer in your browser..."
         
         try:
-            # 1. Use CAI's native function to load the graph
             G = load_graph() 
             
-            # 2. Import your external script
             from CAI_memorygraph import generate_interactive_map
             
-            # 3. Hand the graph to the rendering engine
             generate_interactive_map(G)
         except Exception as e:
             reply = f"[ERROR] Could not launch visualizer: {e}"
 
-        # 4. Update the UI Chat History safely
         chat_history.append({"role": "user", "content": user_input})
         chat_history.append({"role": "assistant", "content": reply})
         
-        # 5. Return back to the UI (bypassing the main AI brain)
         return reply, chat_history
 
 # --- SLEEP COMMAND INTERCEPTOR ---
@@ -720,7 +686,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         trigger_rem_sleep(collection, model, tokenizer)
         
         return reply, chat_history
-# ---------------------------------
     global SYSTEM_STATE, BASE_PROMPT, ACCUMULATED_FEEDBACK, CORRECTION_ATTEMPT_COUNT
 
     if not chat_history:
@@ -739,7 +704,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
     extracted_text = ""
     ocr_context = ""
 
-    # Keep the existing PDF logic
     if pdf_path:
         print(f"\n[FRONTAL LOBE] Deep studying PDF: {pdf_path}")
         from Frontal_learning import learn_from_pdf
@@ -773,7 +737,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
                     
                     tool_result = execute_reflex_action(state_json)
                     
-                    # Feed the result of the automatic action back into the conversation context
                     ocr_context = (
                         f"\n\n[SYSTEM: You perceived the environment and extracted this state: {state_json.get('detected_state', 'Unknown')}. "
                         f"You automatically triggered the '{target_tool}' reflex. Result: {tool_result}]\n"
@@ -805,12 +768,10 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         BASE_PROMPT = current_prompt
         ACCUMULATED_FEEDBACK = ""
     
-    # ---------------------------------------------------------
-    # FAILSAFE INITIALIZATION (Wipe the slate before searching)
+    # Wipe the slate before searching
     synthesized_context = ""
     past_memories_list = []
     past_memories = ""
-    # ---------------------------------------------------------
     
     from Temporal_memory import retrieve_weighted_memories, process_cognitive_loop
     past_memories, recalled_data = retrieve_weighted_memories(current_prompt, collection)
@@ -822,25 +783,7 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         from Hippocampus import reconstruct_memory
         from Temporal_memory import ask_gemma_internal
 
-        # --- REFINED CONTEXT PRUNING (GENERAL USE) ---
-        #if 'results' in locals() and results and 'documents' in results and results['documents'][0]:
-            #raw_docs = results.get('documents', [[]])[0]
-            #scores = results.get('distances', [[]])[0] 
-            
-            #filtered_memories = []
-            #for doc, score in zip(raw_docs, scores):
-                # Keep positive confidence scores
-                #if score >= 0.0:  
-                    #filtered_memories.append(doc)
-
-            # Keep up to the Top 3 relevant memories for synthesis
-            #past_memories_list = filtered_memories[:3] 
-            #if past_memories_list:
-                #past_memories = "\n".join(past_memories_list)
-
-        # ==========================================
         # GLOBAL ROUTING DEFAULTS (Failsafe)
-        # ==========================================
         active_brain = "CHAT_BRAIN"
         best_option = {
             "approach": "Default Chat Routing (or Teaching Phase)", 
@@ -854,33 +797,23 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         
         if past_memories_list and 'scores' in locals() and len(scores) > 0:
             if len(scores) >= 2:
-                # Calculate the absolute gap between the #1 match and #2 match
                 gap = abs(scores[0] - scores[1])
-                # Calculate the total spread of all retrieved scores
                 score_spread = abs(max(scores) - min(scores)) if max(scores) != min(scores) else 1.0
-                
-                # Dominance Ratio: What percentage of the variance is just the gap between #1 and #2?
                 dominance_ratio = gap / score_spread
-                
-                # If the gap is massive (> 40% of total spread), it's a definitive outlier
                 if dominance_ratio > 0.40:
                     is_perfect_match = True
                     print(f"\n-> [SYSTEM GATE] Reflex Arc Engaged! Top memory dominates by {dominance_ratio*100:.1f}%.")
             elif len(scores) == 1:
-                # If the database ONLY found exactly 1 match
                 is_perfect_match = True
                 print("\n-> [SYSTEM GATE] Reflex Arc Engaged! Sole memory match found.")
 
-        # ==========================================
         # GENERAL USE / PROCEDURAL ROUTING 
-        # ==========================================
         print("-> [ROUTER] Booting procedural evaluation...")
         
         if past_memories:
             with safe_disable_adapter(model):
                 synthesized_context = reconstruct_memory(past_memories, current_prompt, model, tokenizer, ask_gemma_internal, working_history)
         else:
-            # THE FIX: If past_memories is blank but the reranker found a hit, grab the raw text!
             if 'recalled_data' in locals() and recalled_data:
                 top_hit = recalled_data[0]
                 synthesized_context = top_hit.get('text', top_hit.get('content', top_hit.get('document', "")))
@@ -903,9 +836,7 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         best_option = pick_best_option(world_model_options)
         print(f"\n[WORLD MODEL] Selected Strategy: {best_option['approach']} (Confidence: {best_option['confidence']})")
 
-        # -----------------------------------------------------------------------
         # 1. PARIETAL LOBE: RIGHT-OF-WAY CHECK
-        # -----------------------------------------------------------------------
         print("\n[ROUTER] Checking Parietal Lobe for registered tools...")
         from Parietal_skills import select_and_execute_skill
         tool_result = select_and_execute_skill(current_prompt, model, tokenizer)
@@ -916,10 +847,8 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
             # Patch 2: Data Protection. If the tool outputs numbers/math, output directly.
             if any(char.isdigit() for char in tool_result):
                 print(f"\n[ANIMA]: {tool_result.strip()}")
-                # safely bypass the LLM summarizing it
                 active_brain = "DIRECT_OUTPUT" 
                 
-            # Otherwise, route to Memory to summarize text-based tool outputs naturally
             else:
                 active_brain = "MEMORY"
                 current_prompt = f"{current_prompt}\n\n[SYSTEM CONTEXT - TOOL OUTPUT]: {tool_result}"
@@ -936,17 +865,13 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
             }
 
             # --- BIDDING ROUND 0: THE SMART CIRCUIT BREAKER (Unified) ---
-            # Get the top memory score and verification status safely
             if 'recalled_data' in locals() and recalled_data:
                 top_hit = recalled_data[0]
                 top_mem_score = top_hit.get('rerank_score', 0.0)
-                # Ensure we check the verification flag!
                 is_verified = top_hit.get('metadata', {}).get('verified', False) or top_hit.get('verified', False)
             else:
                 top_mem_score = 0.0
                 is_verified = False
-    
-            # THE FIX: Only allow the override if the memory is explicitly VERIFIED
             if is_verified and (top_mem_score > 3.0 or ('is_perfect_match' in locals() and is_perfect_match)):
                 print(f" -> [ARBITRATION] Verified high-confidence memory detected. Bidding heavily to protect CHAT_BRAIN.")
                 bids["CHAT_BRAIN"] += 5.0 
@@ -958,17 +883,14 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
                 }
             elif top_mem_score > 3.0:
                 print(f" -> [ARBITRATION] High memory confidence ({top_mem_score:.2f}), but memory is UNVERIFIED. Standing down circuit breaker.")
-            # --------------------------------------------------
     
             # 2. BIDDING ROUND 1: THE WORLD MODEL (System 2 - Deep Context)
-            # We apply a high weight (1.2x) because this model actually read the memory.
             wm_source = best_option.get("source", "")
             wm_conf = float(best_option.get("confidence", 0.0))
             wm_approach = best_option.get("approach", "")
             
-            # Absolute Override: If the World Model realizes we are just storing a fact, lock it down.
             if "Declarative Learning" in wm_approach:
-                bids["CHAT_BRAIN"] += 2.0  # Unbeatable bid
+                bids["CHAT_BRAIN"] += 2.0  
                 print(" -> [ARBITRATION] World Model bids 2.00 for CHAT_BRAIN (Declarative Learning).")
             else:
                 if wm_source == "memory":
@@ -980,14 +902,10 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
                 
                 print(f" -> [ARBITRATION] World Model bids for {wm_source} with weighted score {(wm_conf * 1.2):.2f}.")
             
-            # =================================================================
-            # 1. RUN DETERMINISTIC COMPARISON FIRST (The Shield)
-            # =================================================================
+            # 1. RUN DETERMINISTIC COMPARISON FIRST
             deterministic_result = extract_numeric_comparison(current_prompt, synthesized_context)
 
-            # =================================================================
             # BIDDING ROUND 1.5: THE REGEX HEURISTIC & SHIELD ROUTING
-            # =================================================================
             import re
             
             math_patterns = [
@@ -1005,18 +923,15 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
             ]
             
             is_regex_math = any(re.search(p, current_prompt.lower()) for p in math_patterns + numeric_context_patterns)
-            
-            # THE FIX: Shield Logic
+
             if deterministic_result:
                 print("  -> [ARBITRATION] Deterministic comparison solved the problem. Bypassing Math Brain.")
-                bids["CHAT_BRAIN"] += 5.0 # The Chat Brain will just read the deterministic answer and reply
+                bids["CHAT_BRAIN"] += 5.0
             elif is_regex_math:
                 print("  -> [ARBITRATION] Complex numeric/word problem detected. Mandating MATH_BRAIN (+5.0).")
                 bids["MATH_BRAIN"] += 5.0
-            # =================================================================
-            # 3. BIDDING ROUND 2: SEMANTIC INTENT (System 1 - BART)
-            # =================================================================
-            # We apply a penalty weight (0.8x) because BART is easily confused by keywords.
+                
+            # 3. BIDDING ROUND 2: SEMANTIC INTENT
             if 'intent_classifier' in globals() and intent_classifier is not None:
                 gate_result = intent_classifier(
                     current_prompt.lower(),
@@ -1040,12 +955,7 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
             else:
                 print(" -> [ARBITRATION WARNING] BART offline. Skipping System 1 bids.")
 
-            # =================================================================
-            # ROUND 3: FINAL VERDICT (Winner Takes All)
-            # =================================================================
-            # THE FIX: Removed the minimum threshold limit. The highest bidder always wins.
-            
-            # Ensure Chat Brain has a baseline score of 0.01 just in case all bids are exactly 0.0
+            # ROUND 3: FINAL VERDICT
             if "CHAT_BRAIN" not in bids:
                 bids["CHAT_BRAIN"] = 0.01
                 
@@ -1054,13 +964,10 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
             
             print(f"\n  [ROUTER VERDICT] {active_brain} won arbitration with a score of {winning_score:.2f}.")
 
-            # =================================================================
             # 5. THE VERDICT
-            # =================================================================
             winning_brain = max(bids, key=bids.get)
             winning_score = bids[winning_brain]
             
-            # Failsafe threshold: If no brain bids confidently, default to basic conversation.
             if winning_score < 0.4:
                 active_brain = "CHAT_BRAIN"
                 print("\n [ROUTER VERDICT] All bids too low. Defaulting to CHAT_BRAIN.")
@@ -1072,7 +979,7 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
     if active_brain == "CODE_BRAIN":
         print("\n[PARIETAL LOBE] Bypassing base model. Booting Qwen Code Specialist...")
         
-        # --- 1. FREE UP VRAM (Unload Gemma) ---
+        # 1. FREE UP VRAM (Unload Gemma)
         if 'model' in globals():
             del model
         if 'tokenizer' in globals():
@@ -1081,7 +988,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
 
         gc.collect()
         torch.cuda.empty_cache()
-        # --------------------------------------
 
         from Parietal_skills import generate_and_save_skill
         import glob
@@ -1128,7 +1034,7 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
             local_files_only=True
         )
 
-        # --- 4. ORIGINAL RESPONSE GENERATION (Kept safely intact) ---
+        # 4. ORIGINAL RESPONSE GENERATION
         list_of_files = glob.glob('./skills/*.py')
         if list_of_files:
             latest_file = max(list_of_files, key=os.path.getctime)
@@ -1149,7 +1055,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         math_response_container = []
 
         def math_worker():
-            # THE FIX: Pass raw 'past_memories' instead of Gemma's 'synthesized_context'
             res = solve_math_problem(current_prompt, past_memories, working_history, ocr_context, collection, brain_pipeline.put)
             math_response_container.append(res)
         
@@ -1193,7 +1098,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
             response = re.sub(r'\n{3,}', '\n\n', scrubbed).strip()
         else:
             response = raw_response
-        # --------------------------------
 
     else:
         # 1. PLANNING
@@ -1220,7 +1124,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
                 "Do NOT calculate anything. Do NOT list steps. Do NOT use bullet points."
             )
         else:
-            # --- FETCH EXECUTIVE GOALS ---
             from Temporal_memory import get_active_goals_from_db
             active_goals = get_active_goals_from_db(limit=3)
             
@@ -1231,30 +1134,22 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
                     goal_context += f"- [Priority {g['priority']}] {g['description']} (Target: {g['success_criteria']})\n"
                 goal_context += "--------------------\n\n"
 
-            # --- SYSTEM GATE: REFINED VERBATIM PASSTHROUGH ---
-            # Triggers if BART identified a fact and it exists in memory
             if 'is_factual_recall' in locals() and is_factual_recall:
                 print("\n-> [SYSTEM GATE] High confidence fact retrieved. Extracting primary content...")
                 
                 try:
-                    # Parse the structured JSON context returned by retrieve_weighted_memories
                     import json
                     memories = json.loads(synthesized_context)
                     if isinstance(memories, list) and len(memories) > 0:
-                        # Extract content from the top-ranked memory and strip "Memory: " prefix
                         final_response = memories[0].get("content", "").replace("Memory: ", "").strip()
                     else:
                         final_response = synthesized_context.strip()
                 except Exception:
-                    # Fallback if the context isn't valid JSON
                     final_response = synthesized_context.strip()
                 
-                # Update chat history and EXIT immediately to bypass LLM generation
                 chat_history.append({"role": "assistant", "content": final_response})
                 return final_response, chat_history
-            # ----------------------------------------------------------------------------
 
-            # --- COMPILE SYSTEM RULES (Only runs for complex tasks/thought) ---
             system_rules = (
                 "You are Anima, a direct and highly logical AI assistant. "
                 f"CURRENT ACTIVE NEURAL PATHWAY: {active_brain}\n\n"
@@ -1304,14 +1199,14 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         
         related_mem_ids = [mem["id"] for mem in recalled_data] if recalled_data else []
         
-# Determine if this was a factual conversation or a task/tool execution
+        # Determine if this was a factual conversation or a task/tool execution
         is_procedural = active_brain in ["CODE_BRAIN", "MATH_BRAIN"] or "tool" in str(best_option).lower()
         mem_class = "procedural" if is_procedural else "episodic"
         
         # Determine source modality based on the active brain
         modality = active_brain.lower() if active_brain else "base_brain"
         
-        # Determine if it is verified (e.g., a math calculation or code execution is verified, chat is not)
+        # Determine if it is verified
         is_verified = True if is_procedural else False
 
         log_memory(
@@ -1354,15 +1249,8 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
         if recalled_data:
             from Temporal_memory import reinforce_memory
             for mem in recalled_data:
-                # Penalize the memory confidence
                 reinforce_memory(mem["id"], collection, success=False) 
         
-        # --- THE FIX: Stop overwriting the response! ---
-        # We log the suspected error internally, but we MUST return the actual answer 
-        # that the Chat Brain generated so the benchmark can see it.
-        
-        # (We also comment out SYSTEM_STATE so it doesn't bleed into the next question)
-        # SYSTEM_STATE = "AWAITING_CORRECTION" 
         
         display_user_input = f"[Image Uploaded] {user_input}" if 'image_path' in locals() and image_path else user_input
         chat_history.append({"role": "user", "content": display_user_input})
@@ -1386,7 +1274,6 @@ def get_gemma_response(user_input, chat_history, image_path=None, pdf_path=None)
                 ids=[str(uuid.uuid4())]
             )
             
-        # Ensure it returns the standard response here too
         display_user_input = f"[Image Uploaded] {user_input}" if 'image_path' in locals() and image_path else user_input
         chat_history.append({"role": "user", "content": display_user_input})
         chat_history.append({"role": "model", "content": response})

@@ -42,22 +42,17 @@ def compress_code_context(working_history, ocr_context, current_prompt):
     history_str = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in recent_history]) if recent_history else "None"
     
     # 2. Filter OCR Context
-    # Only pass OCR if the user explicitly references the file/data in their prompt
     ocr_keywords = ['image', 'picture', 'pdf', 'document', 'file', 'data', 'text', 'read', 'extract']
     prompt_lower = current_prompt.lower()
     
     if ocr_context and any(kw in prompt_lower for kw in ocr_keywords):
-        # Cap OCR at ~1500 characters to protect the 3B model's context window
         ocr_str = ocr_context[:1500] + "\n...[TRUNCATED TO PROTECT VRAM]" if len(ocr_context) > 1500 else ocr_context
     else:
         ocr_str = "[SYSTEM: No relevant document data requested for this task.]"
         
     return history_str, ocr_str
 
-# ==============================================================================
 # SKILL METADATA & REGISTRY
-# ==============================================================================
-
 def load_skill_metadata():
     if os.path.exists(SKILL_METADATA_FILE):
         with open(SKILL_METADATA_FILE, "r") as f:
@@ -145,8 +140,6 @@ def select_and_execute_skill(user_input, model, tokenizer):
     if not SKILL_REGISTRY:
         return None
     
-    # --- PATCH 1: THE INFERENCE GATE ---
-    # Only wake up Gemma if the user uses a trigger word or names a tool
     user_text_lower = user_input.lower()
     trigger_words = ["calculate", "use tool", "compute", "run"]
     tool_names = [name.replace('_', ' ') for name in SKILL_REGISTRY.keys()]
@@ -154,8 +147,7 @@ def select_and_execute_skill(user_input, model, tokenizer):
     needs_tool = any(word in user_text_lower for word in trigger_words + tool_names)
     
     if not needs_tool:
-        return None # Instantly skip to the World Model, saving VRAM!
-    # -----------------------------------
+        return None
 
     available_tools = list(SKILL_REGISTRY.keys())
     prompt = f"""
@@ -186,11 +178,6 @@ def select_and_execute_skill(user_input, model, tokenizer):
 
     return None
 
-
-# ==============================================================================
-# MODULE-LEVEL QWEN HELPERS  (must be defined before any function calls them)
-# ==============================================================================
-
 def load_auditor():
     global coder_loaded, code_model, code_tokenizer
     if not coder_loaded:
@@ -201,7 +188,6 @@ def load_auditor():
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4"
         )
-        # Path() bypasses huggingface_hub's repo ID string validation
         code_tokenizer = AutoTokenizer.from_pretrained(Path(CODER_MODEL_PATH))
         code_model = AutoModelForCausalLM.from_pretrained(
             Path(CODER_MODEL_PATH),
@@ -251,8 +237,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
  
     is_success = False
     successful_candidates = []
- 
-    # Define the 3 personas (lean — style only, no filler)
+    
     persona_styles = {
         "SOFTWARE ENGINEER": "Optimize for clean, readable, Pythonic code.",
         "SYSTEMS ENGINEER":  "Optimize for fault tolerance and strict edge-case handling.",
@@ -260,10 +245,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
     }
  
     try:
-        # =================================================================
         # PHASE 1 — ISOLATED QA: Generate hostile mock data BEFORE
-        # any persona sees the task. Completely blind to any solution.
-        # =================================================================
         pipeline_put("\n[PHASE 1] Generating Hostile QA Dataset (blind — no code exists yet)...")
         qa_prompt = (
             f"You are a destructive QA tester. Your only job is to break Python scripts.\n"
@@ -278,10 +260,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
         )
         pipeline_put(f"   -> [QA] Hostile input locked in: {hostile_mock_data[:80]}...")
  
-        # =================================================================
         # PHASE 2 — DESIGN DISCUSSION: Each persona proposes an approach.
-        # No code written yet — proposals only.
-        # =================================================================
         pipeline_put("\n[PHASE 2] Design Council — Gathering independent proposals...")
         proposals = {}
         for persona_name, style_note in persona_styles.items():
@@ -304,10 +283,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
             )
             pipeline_put(f"   -> [{persona_name}] Proposal received.")
  
-        # =================================================================
         # PHASE 3 — CROSS-CRITIQUE: Each persona reviews the other two
-        # proposals and identifies weaknesses. Output is a consensus doc.
-        # =================================================================
         pipeline_put("\n[PHASE 3] Cross-Critique — Building consensus design document...")
         all_proposals_text = "\n\n".join(
             [f"[{name} PROPOSAL]:\n{proposal}" for name, proposal in proposals.items()]
@@ -327,18 +303,14 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
             system_prompt="You are a senior technical architect. Output a consensus design document only. No code."
         )
         pipeline_put("   -> [COUNCIL] Consensus design document established.")
- 
-        # =================================================================
+
         # PHASE 4 — CODE GENERATION: Each persona writes code based on
-        # the consensus document. Shared error ledger carries forward.
-        # =================================================================
         pipeline_put("\n[PHASE 4] Code Generation — Each engineer implements the consensus...")
         shared_error_ledger = ""
  
         for branch_name, style_note in persona_styles.items():
             pipeline_put(f"\n   -> [{branch_name}] Writing implementation...")
- 
-            # Build the generation prompt from the consensus doc
+
             generation_prompt = (
                 f"You are a {branch_name}. {style_note}\n"
                 f"Task: '{current_prompt}'\n"
@@ -350,8 +322,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
                 f"that implements the agreed design.\n"
                 f"Output ONLY the code inside a ```python block."
             )
- 
-            # Inject shared failure ledger if prior branches failed
+
             if shared_error_ledger:
                 generation_prompt += (
                     f"\n\n--- CRITICAL: PREVIOUS IMPLEMENTATIONS FAILED QA ---\n"
@@ -361,17 +332,14 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
                 )
  
             raw_code_response = ask_qwen(generation_prompt)
- 
-            # Clean output
+
             match = re.search(r'```python\n(.*?)\n```', raw_code_response, re.DOTALL)
             clean_code = (
                 match.group(1).strip() if match
                 else raw_code_response.replace("```python", "").replace("```", "").strip()
             )
  
-            # =============================================================
             # PHASE 5 — SANDBOX TEST using the pre-generated hostile data
-            # =============================================================
             pipeline_put(f"   -> [{branch_name}] Entering Sandbox with hostile QA data...")
             start_time = time.time()
             success, output = isolated_sandbox_test(
@@ -379,8 +347,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
                 model=code_model, tokenizer=code_tokenizer
             )
             execution_time = time.time() - start_time
- 
-            # --- 1-RETRY LIFELINE ---
+
             if not success or len(output.strip()) == 0:
                 pipeline_put(f"   -> [{branch_name}] FAILED initial QA. Error: {output[:120]}. Initiating self-correction...")
                 fix_prompt = (
@@ -404,8 +371,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
                     model=code_model, tokenizer=code_tokenizer
                 )
                 execution_time = time.time() - start_time
- 
-            # --- LOG OUTCOME ---
+
             if not success or len(output.strip()) == 0:
                 pipeline_put(f"   -> [WARNING] {branch_name} failed even after self-correction. Logging to shared ledger...")
                 shared_error_ledger += (
@@ -426,24 +392,21 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
                     "lines": lines_of_code
                 })
  
-        # =================================================================
+
         # PHASE 6 — TOURNAMENT: Score all passing candidates and pick best
-        # =================================================================
         if not successful_candidates:
             pipeline_put("\n   -> [CRITICAL ERROR] All branches failed hostile QA even with self-correction. Aborting save.")
             return False
  
         pipeline_put(f"\n[PHASE 6] Tournament Evaluation — {len(successful_candidates)}/3 branches passed hostile QA.")
  
-        # Sort: fastest execution first, then fewest lines as tiebreaker
+
         successful_candidates.sort(key=lambda x: (x['time'], x['lines']))
         ultimate_winner = successful_candidates[0]
         pipeline_put(f"   -> [WINNER] {ultimate_winner['branch']} selected. "
                      f"(Time: {ultimate_winner['time']:.4f}s | Lines: {ultimate_winner['lines']})")
  
-        # =================================================================
         # PHASE 7 — SAVE: Generate semantic filename and write to disk
-        # =================================================================
         pipeline_put("\n[PHASE 7] Generating semantic filename...")
         name_prompt = (
             f"Task: '{current_prompt}'. Generate a short descriptive snake_case filename "
@@ -483,18 +446,15 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
         # 3. Force garbage collection
         gc.collect()
         
-        # --- THE FIX (CROSS-BRAIN FIX A): VRAM VERIFICATION LOOP ---
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             
             import time
             start_flush = time.time()
             vram_cleared = False
-            
-            # Wait up to 5 seconds for the GPU to physically release the memory
+
             while time.time() - start_flush < 5.0: 
                 current_vram = torch.cuda.memory_allocated() / (1024 ** 2)
-                # If VRAM dropped by at least 500MB, we know the model was successfully evicted
                 if vram_before - current_vram > 500: 
                     vram_cleared = True
                     pipeline_put(f"   -> [SYSTEM] VRAM successfully flushed! Freed {vram_before - current_vram:.0f}MB.")
@@ -503,17 +463,12 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
             
             if not vram_cleared:
                 pipeline_put(f"   -> [WARNING] VRAM flush timeout or leak detected. Current VRAM stuck at {current_vram:.0f}MB.")
-        # -------------------------------------------------------------
 
         global coder_loaded
         code_model = None
         code_tokenizer = None
         coder_loaded = False
         pipeline_put("   -> [SYSTEM] Execution Complete. Returning to Base Brain.")
-
-# ==============================================================================
-# SANDBOX
-# ==============================================================================
 
 def get_venv_executables():
     """Returns the correct paths for python and pip inside the isolated venv."""
@@ -534,11 +489,9 @@ def isolated_sandbox_test(code_string, test_input="test_data", model=None, token
     Runs AI code in an isolated venv, catches missing PIP packages,
     and prevents infinite loops using a 15-second timeout and recursion depth limits.
     """
-    # 1. Prevent infinite pip loops
     if retry_depth > 2:
         return False, "Execution halted: Maximum auto-install retries exceeded. Check module names."
 
-    # 2. Initialize walled garden if it doesn't exist
     if not os.path.exists(VENV_DIR):
         print("\n[SYSTEM ALERT] Initializing isolated AI virtual environment (ai_venv)...")
         subprocess.run([sys.executable, "-m", "venv", VENV_DIR])
@@ -577,7 +530,6 @@ def isolated_sandbox_test(code_string, test_input="test_data", model=None, token
             env=sandbox_env
         )
 
-        # Auto-pip interceptor
         if "ModuleNotFoundError" in result.stderr:
             match = re.search(r"No module named '(\w+)'", result.stderr)
             if match and model and tokenizer:
@@ -619,11 +571,6 @@ def isolated_sandbox_test(code_string, test_input="test_data", model=None, token
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-
-# ==============================================================================
-# SKILL AUDITOR
-# ==============================================================================
-
 def audit_and_fix_skills(model, tokenizer):
     """
     Scans the ./skills directory, tests every python file in the sandbox,
@@ -652,7 +599,7 @@ def audit_and_fix_skills(model, tokenizer):
             repair_log.append(f"PASS: {filename}")
         else:
             print(f"      [FAIL] {filename} crashed. Triggering Code Brain repair...")
-            load_auditor()  # Boot Qwen only if something is broken
+            load_auditor()
 
             repair_prompt = f"""
 The following system tool named '{filename}' is currently broken.

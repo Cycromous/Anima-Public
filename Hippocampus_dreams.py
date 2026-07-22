@@ -52,9 +52,7 @@ def trigger_rem_sleep(collection, model, tokenizer):
             topic = gap['topic']
             print(f"\n-> [DREAMING ABOUT]: {topic}")
             
-            # ---------------------------------------------------------
             # PHASE 1: PREDICTION (Hypothesis Generation)
-            # ---------------------------------------------------------
             print("   -> [PREDICTION] Polling Graph DB for context...")
             context = get_multihop_context(topic, max_depth=2) or "No prior context available."
             
@@ -68,7 +66,6 @@ def trigger_rem_sleep(collection, model, tokenizer):
             
             raw_hypotheses = ask_gemma_internal(hyp_prompt, model, tokenizer)
             try:
-                # Clean potential markdown formatting
                 clean_hyp = re.sub(r'```json\n(.*?)\n```', r'\1', raw_hypotheses, flags=re.DOTALL)
                 clean_hyp = clean_hyp.replace('```', '').strip()
                 hypotheses = json.loads(clean_hyp)
@@ -77,9 +74,7 @@ def trigger_rem_sleep(collection, model, tokenizer):
                 print(f"   -> [WARNING] Hypothesis generation failed: {e}. Falling back to blind search.")
                 hypotheses = [f"I need to learn what {topic} is."]
 
-            # ---------------------------------------------------------
             # PHASE 2: EXPERIMENT (Targeted Search Formulation)
-            # ---------------------------------------------------------
             exp_prompt = f"""
             To prove or disprove these hypotheses about '{topic}': {hypotheses}
             What is the single best web search query to find the ground truth?
@@ -105,13 +100,10 @@ def trigger_rem_sleep(collection, model, tokenizer):
                 if article_text:
                     combined_research += f"\n\nSource: {res['title']}\n{article_text}"
             
-            # ---------------------------------------------------------
             # PHASE 3: EPISTEMIC UPDATE (Surprise Calculation)
-            # ---------------------------------------------------------
             if combined_research.strip():
                 print("   -> [EVALUATION] Calculating epistemic surprise metric...")
                 
-                # Truncate research to fit context window for evaluation
                 eval_research = combined_research[:3000] 
                 
                 surprise_prompt = f"""
@@ -124,7 +116,6 @@ def trigger_rem_sleep(collection, model, tokenizer):
                 
                 try:
                     surprise_str = ask_gemma_internal(surprise_prompt, model, tokenizer)
-                    # Extract just the float
                     match = re.search(r'0\.\d+|1\.0', surprise_str)
                     surprise_score = float(match.group(0)) if match else 0.5
                 except Exception:
@@ -132,13 +123,11 @@ def trigger_rem_sleep(collection, model, tokenizer):
                 
                 print(f"   -> [SURPRISE SCORE]: {surprise_score:.2f}")
                 
-                # Scale importance from a baseline of 5 up to 10 based on surprise
                 epistemic_weight = 5.0 + (surprise_score * 5.0)
                 
                 print("   -> [CONSOLIDATING] Forging new neural pathways...")
                 embed_and_save_text(combined_research, collection, source=f"REM Cycle: {topic}", importance=epistemic_weight)
                 
-                # Extract logical triples for the graph database
                 try:
                     raw_triples = extract_relationships(combined_research[:1500])
                     unique_triples = []

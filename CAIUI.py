@@ -56,12 +56,10 @@ st.set_page_config(
 # --- 2. BOOT SEQUENCE ---
 if "brain_loaded" not in st.session_state:
     AnimaUI.show_boot_screen()
-    # Import heavy logic here to delay it during boot
     from CAI import get_gemma_response
     st.session_state.brain_loaded = True
     st.rerun()
 
-# Apply standard UI design
 AnimaUI.inject_global_styles()
 
 # --- 3. SESSION STATE ---
@@ -111,7 +109,7 @@ else:
 user_input = st.chat_input("Ask Anima anything...")
 
 if user_input:
-    from CAI import get_gemma_response # Ensure import for logic
+    from CAI import get_gemma_response
     display_content = f"📎 *Image attached*\n\n{user_input}" if current_image_path else user_input
 
     AnimaUI.render_message("user", display_content)
@@ -127,7 +125,6 @@ if user_input:
                 )
                 st.session_state.backend_history = updated_history
                 
-                # Render using the logic we extracted
                 AnimaUI.render_message("assistant", reply)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
 

@@ -5,7 +5,6 @@ import sympy
 from sympy.parsing.sympy_parser import parse_expr
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
-# --- ADD THE COMPRESSOR FUNCTION HERE ---
 def compress_math_context(working_history, ocr_context):
     """
     Layer 2 Filter: Scours working history and OCR for explicitly technical data.
@@ -14,16 +13,15 @@ def compress_math_context(working_history, ocr_context):
     import re
     compressed_history = []
     
-    # We keep a turn if it contains digits, operators, or technical/engineering units
     technical_indicators = [
         r'\d', r'\+', r'\-', r'\*', r'/', r'=', r'%', r'<', r'>',
-        r'\b(km|m|cm|mm|kg|g|mg|lbs|oz)\b',                 # Distance/Weight
-        r'\b(kbps|mbps|gbps|hz|khz|mhz|ghz|dbm|watts)\b',   # Network/Hardware
-        r'\b(cost|rate|total|sum|average|variance)\b'       # Math keywords
+        r'\b(km|m|cm|mm|kg|g|mg|lbs|oz)\b',                 
+        r'\b(kbps|mbps|gbps|hz|khz|mhz|ghz|dbm|watts)\b',   
+        r'\b(cost|rate|total|sum|average|variance)\b'       
     ]
     combined_pattern = re.compile('|'.join(technical_indicators), re.IGNORECASE)
 
-    # 1. Compress History (Keep only technical turns)
+    # 1. Compress History
     if working_history:
         for msg in working_history:
             if combined_pattern.search(msg['content']):
@@ -31,7 +29,7 @@ def compress_math_context(working_history, ocr_context):
     
     history_str = "\n".join(compressed_history) if compressed_history else "No numerical or technical context in recent history."
 
-    # 2. Compress OCR (Line by Line filtering)
+    # 2. Compress OCR 
     ocr_str = "None"
     if ocr_context:
         compressed_ocr = [line for line in ocr_context.split('\n') if combined_pattern.search(line)]
@@ -39,7 +37,6 @@ def compress_math_context(working_history, ocr_context):
 
     return history_str, ocr_str
 
-# THE FIX: Changed 'synthesized_context' to 'past_memories' in the signature
 def solve_math_problem(prompt, past_memories, working_history, ocr_context, collection, queue_put):
     """
     JIT Lobe: Boots Qwen2.5-Math, solves the equation, verifies deterministically, 
@@ -47,7 +44,6 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
     """
     queue_put("\n[PARIETAL MATH LOBE] Initializing Dedicated Math Brain (JIT)...")
     
-    # UPDATE THIS PATH to where you extract Qwen2.5-Math-1.5B-Instruct
     MATH_MODEL_PATH = "/home/johnray/Personal/qwen2.5-math-transformers-1.5b-instruct-v1" 
     
     quantization_config = BitsAndBytesConfig(
@@ -77,7 +73,6 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
         # 1. Format the Unified Context via the Compressor
         history_str, ocr_str = compress_math_context(working_history, ocr_context)
 
-        # THE FIX: Inject the raw 'past_memories' JSON here instead of the hallucination-prone summary
         context_payload = f"""
 --- DATABASE CONTEXT (Raw Recalled Info) ---
 {past_memories}
@@ -119,18 +114,13 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
                 {"role": "system", "content": system_rules},
                 {"role": "user", "content": prompt}
             ]
-            
-            # Apply the template which sets up the <|im_start|>assistant prompt
+
             input_text = math_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            
-            # --- THE FIX (FIX 3): PUT WORDS IN ITS MOUTH ---
             forced_start = "Here is the step-by-step logical calculation. The final numerical value is <verify>"
             input_text += forced_start
-            # -----------------------------------------------
             
             inputs = math_tokenizer(input_text, return_tensors="pt").to(device)
             
-            # Low Temperature for Strict Logic
             with torch.no_grad():
                 outputs = math_model.generate(
                     **inputs, 
@@ -142,13 +132,9 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
             
             input_length = inputs["input_ids"].shape[1]
             persona_response = math_tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True).strip()
-            
-            # We must attach the forced start back onto the response so the regex can find the opening <verify> tag!
             generated_solutions[persona_name] = forced_start + persona_response
 
-        # =================================================================
         # 4. SELF-CONSISTENCY EVALUATION (Majority Voting)
-        # =================================================================
         from collections import defaultdict
         queue_put("   -> [MATH LOBE] Evaluating generated solutions for consensus...")
         
@@ -161,27 +147,17 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
             Handles: whitespace, trailing punctuation, equation right-hand sides,
             and float/int equivalence (e.g. '42.0' == '42').
             """
-            # Strip whitespace and trailing punctuation
             cleaned = raw_ans.strip().replace(" ", "").rstrip('.')
-            
-            # If it contains an equals sign, take only the right-hand side
+
             if "=" in cleaned:
                 cleaned = cleaned.split("=")[-1]
-            
-            # --- FIX 1: NUMERIC NORMALIZATION ---
-            # Converts '42.0', '42', '42.00' all to the same canonical form
-            # so they match correctly in the tally.
             try:
                 as_float = float(cleaned)
-                # If it's a whole number, represent as int string ('42' not '42.0')
                 if as_float == int(as_float):
                     return str(int(as_float))
                 else:
-                    # Round to 6 decimal places to avoid float precision mismatches
                     return str(round(as_float, 6))
             except ValueError:
-                # Not a pure number (e.g. symbolic expression like '2*x+5')
-                # Return cleaned string as-is for symbolic comparison
                 return cleaned
  
         for persona, solution in generated_solutions.items():
@@ -191,8 +167,7 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
                 normalized_ans = normalize_answer(raw_ans)
                 
                 answer_tally[normalized_ans].append(persona)
-                
-                # Save the first full solution that yielded this specific answer
+
                 if normalized_ans not in solution_map:
                     solution_map[normalized_ans] = solution
             else:
@@ -201,7 +176,6 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
         raw_response = None
         
         if answer_tally:
-            # Find the answer with the most votes
             best_ans = max(answer_tally, key=lambda k: len(answer_tally[k]))
             votes = len(answer_tally[best_ans])
             voting_personas = ", ".join(answer_tally[best_ans])
@@ -211,18 +185,12 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
                 raw_response = solution_map[best_ans]
             else:
                 queue_put("   -> [MATH LOBE WARNING] No consensus reached (1/3 split). Defaulting to Pure Mathematician's logic.")
-                # --- FIX 2: SAFE FALLBACK ---
-                # Find whichever normalized answer the Pure Mathematician produced.
-                # If Pure Mathematician failed to produce verify tags entirely,
-                # fall back to whichever answer scored highest rather than
-                # crashing with a KeyError or returning None.
                 pure_math_ans = next(
                     (ans for ans, personas in answer_tally.items() if "PURE MATHEMATICIAN" in personas),
-                    best_ans  # Safe fallback if Pure Mathematician produced no tags
+                    best_ans
                 )
                 raw_response = solution_map.get(pure_math_ans, solution_map[best_ans])
         else:
-            # Absolute fallback if NO persona used the tags
             queue_put("   -> [FATAL WARNING] No verification tags passed by any persona. Defaulting to Applied Engineer.")
             raw_response = generated_solutions.get("APPLIED ENGINEER", next(iter(generated_solutions.values())))
 
@@ -233,21 +201,15 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
         if match:
             raw_equation = match.group(1).strip()
             
-            # --- THE NEW SCRUBBER ---
-            # If the LLM included an equals sign, just take the final answer on the right
             if "=" in raw_equation:
                 raw_equation = raw_equation.split("=")[-1].strip()
-
-            # Remove common trailing punctuation that breaks SymPy
+                
             raw_equation = raw_equation.rstrip('.')
-            # ------------------------
             
             try:
-                # Safely evaluate the symbolic math
                 verified_result = parse_expr(raw_equation)
                 queue_put(f"   -> [VERIFIED] Deterministic result: {verified_result}")
                 
-                # Append the verified truth to the LLM's explanation
                 response = f"{raw_response}\n\n[SYSTEM VERIFIED]: The symbolic result evaluates to {verified_result}"
             except Exception as e:
                 queue_put(f"   -> [VERIFICATION FAILED] SymPy could not validate the logic: {e}")
@@ -280,8 +242,7 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
         
         # 3. Force garbage collection
         gc.collect()
-        
-        # --- THE FIX (CROSS-BRAIN FIX A): VRAM VERIFICATION LOOP ---
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             
@@ -299,8 +260,6 @@ def solve_math_problem(prompt, past_memories, working_history, ocr_context, coll
                 time.sleep(0.5)
             
             if not vram_cleared and queue_put:
-                queue_put(f"   -> [WARNING] VRAM flush timeout or leak detected. Current VRAM stuck at {current_vram:.0f}MB.")
-        # -------------------------------------------------------------
 
         if queue_put:
             queue_put("   -> [PARIETAL MATH LOBE] VRAM cleared. Handing control back to Base Brain.")

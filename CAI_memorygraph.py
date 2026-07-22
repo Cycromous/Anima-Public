@@ -19,22 +19,17 @@ def generate_interactive_map(G):
         
     print("[VISUALIZER] Compiling interactive memory map...")
 
-    # Initialize the Pyvis network
     net = Network(height='800px', width='100%', bgcolor='#1a1a1a', font_color='white', directed=True)
-    
-    # Ingest the NetworkX graph seamlessly
+
     net.from_nx(G)
 
-    # Add physics so the nodes bounce and settle naturally
     net.repulsion(node_distance=200, spring_length=250)
-    
-    # Save the HTML file locally
+
     output_file = "CAI_MemoryMap.html"
     net.save_graph(output_file)
     
     print(f"[VISUALIZER] Graph saved to {output_file}. Launching browser...")
-    
-    # Automatically open the generated HTML file in the default web browser
+
     try:
         webbrowser.open('file://' + os.path.realpath(output_file))
     except Exception as e:

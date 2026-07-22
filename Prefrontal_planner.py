@@ -6,10 +6,8 @@ from contextlib import nullcontext
 def generate_plan(user_input, skill_registry, model, tokenizer):
     """Breaks the user request into logical steps, utilizing available skills."""
    
-    # Look inside the toolbox
     available_tools = ", ".join(skill_registry.keys()) if skill_registry else "None"
    
-    # The Upgraded Prompt (No JSON required!)
     prompt = f"""
     Break the following task into a maximum of 3 logical steps.
    
@@ -46,8 +44,7 @@ def generate_plan(user_input, skill_registry, model, tokenizer):
             # Check for bullet points (e.g., "- " or "* ")
             elif line.startswith('- ') or line.startswith('* '):
                 steps.append(line[2:].strip())
-       
-        # If the AI somehow failed to write a list, fallback to raw text
+
         if not steps:
             print("   -> [PLANNER FALLBACK] Failed to parse list. Using raw text.")
             return [user_input]
@@ -104,8 +101,7 @@ def run_planning_loop(user_input, skill_registry, model, tokenizer):
     print("\n[PREFRONTAL PLANNER STARTED]")
     steps = generate_plan(user_input, skill_registry, model, tokenizer)
    
-    # --- THE CIRCUIT BREAKER ---
-    # If the 1B model hallucinates an endless list of steps, slice it down to 5.
+    # THE CIRCUIT BREAKER
     if len(steps) > 5:
         print(f"   -> [CIRCUIT BREAKER] Model generated {len(steps)} steps. Truncating to 5 to prevent execution loops.")
         steps = steps[:5]
@@ -117,13 +113,11 @@ def run_planning_loop(user_input, skill_registry, model, tokenizer):
     evaluation = evaluate_plan(user_input, results, model, tokenizer)
     print(f"   -> Plan Evaluation: Success={evaluation.get('success')}")
    
-    # If the plan failed, do exactly ONE retry to prevent infinite loops
     if not evaluation.get("success") and evaluation.get("improvement"):
         print(f"   -> Retrying with improvement: {evaluation.get('improvement')}")
         new_task = f"{user_input}. Note: {evaluation.get('improvement')}"
         steps = generate_plan(new_task, skill_registry, model, tokenizer)
-       
-        # --- APPLY BREAKER TO THE RETRY AS WELL ---
+
         if len(steps) > 5:
             print(f"   -> [CIRCUIT BREAKER] Truncating retry steps to 5.")
             steps = steps[:5]

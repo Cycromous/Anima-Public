@@ -35,7 +35,6 @@ def add_memory_synapses_batch(triples):
     conflicts_detected = []
 
     for triple in triples:
-        # Unpack, allowing backward compatibility if confidence isn't passed
         subject = triple[0]
         relation = triple[1]
         obj = triple[2]
@@ -44,16 +43,13 @@ def add_memory_synapses_batch(triples):
         subj_norm = subject.lower().strip()
         obj_norm = obj.lower().strip()
 
-        # Add the directed edge with the confidence weight
         G.add_edge(subj_norm, obj_norm, relation=relation, confidence=confidence)
-        
-        # Detect logical contradictions to resolve during REM sleep
+
         if relation == "CONTRADICTS":
             conflicts_detected.append(f"{subj_norm} and {obj_norm}")
 
     save_graph(G)
 
-    # Queue any detected conflicts for subconscious resolution
     for conflict in conflicts_detected:
         print(f"  -> [GRAPH] Contradiction detected: {conflict}. Queuing for REM sleep resolution.")
         log_knowledge_gap_for_dreams(
@@ -73,8 +69,6 @@ def get_multihop_context(topic, max_depth=2):
     
     if topic not in G:
         return None
-        
-    # Create an 'Ego Graph': A subgraph of all nodes within 'max_depth' hops of the topic
     subgraph = nx.ego_graph(G, topic, radius=max_depth)
     
     context_lines = []
@@ -94,10 +88,8 @@ def find_logical_path(start_concept, end_concept):
         return None
         
     try:
-        # Find the shortest path
         path = nx.shortest_path(G, source=start, target=end)
         
-        # Format the path with relations
         path_str = []
         for i in range(len(path)-1):
             u = path[i]

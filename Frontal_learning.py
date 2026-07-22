@@ -51,7 +51,6 @@ def learn_from_pdf(pdf_path, collection):
     image_paths = pdf_to_images(pdf_path)
     all_text = []
 
-    # JIT Load
     nougat_model, nougat_processor = _load_nougat()
 
     try:
@@ -63,7 +62,6 @@ def learn_from_pdf(pdf_path, collection):
             all_text.append(text)
             append_to_training_dataset(text)
     finally:
-        # Always flush even if OCR crashes midway
         _flush_nougat(nougat_model, nougat_processor)
 
     if all_text:
@@ -82,7 +80,6 @@ def learn_from_images(image_paths, collection):
     """
     all_extracted = []
 
-    # JIT Load
     nougat_model, nougat_processor = _load_nougat()
 
     try:
@@ -95,10 +92,8 @@ def learn_from_images(image_paths, collection):
                 )
                 append_to_training_dataset(extracted_content)
     finally:
-        # Always flush even if OCR crashes midway
         _flush_nougat(nougat_model, nougat_processor)
 
-    # Guard against empty results
     if not all_extracted:
         return ""
 

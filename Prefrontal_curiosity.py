@@ -2,7 +2,6 @@ import os
 import json
 import random
 
-# Attempt to load spacy for keyword extraction
 try:
     import spacy
     nlp = spacy.load("en_core_web_sm")
@@ -39,15 +38,13 @@ def log_knowledge_gap_for_dreams(topic, question):
             if g['status'] == 'pending':
                 return # It's already waiting to be dreamed about
             else:
-                # It failed or was resolved before. Force a re-evaluation!
                 g['status'] = 'pending'
                 g['question'] = question
                 with open(filepath, "w", encoding="utf-8") as f:
                     json.dump(gaps, f, indent=4)
                 print(f"\n[CURIOSITY ENGINE] Re-activated '{topic}' in the Hippocampus Dream queue.")
                 return
-            
-    # If it's completely new, append it
+
     gaps.append({
         "topic": topic, 
         "question": question, 

@@ -37,11 +37,9 @@ def compress_code_context(working_history, ocr_context, current_prompt):
     Keeps only the last 3 chat turns and filters OCR data to prevent 
     the 3B model from drowning in visual noise unless explicitly requested.
     """
-    # 1. Truncate History (Last 3 turns max)
     recent_history = working_history[-3:] if working_history else []
     history_str = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in recent_history]) if recent_history else "None"
-    
-    # 2. Filter OCR Context
+
     ocr_keywords = ['image', 'picture', 'pdf', 'document', 'file', 'data', 'text', 'read', 'extract']
     prompt_lower = current_prompt.lower()
     
@@ -52,7 +50,6 @@ def compress_code_context(working_history, ocr_context, current_prompt):
         
     return history_str, ocr_str
 
-# SKILL METADATA & REGISTRY
 def load_skill_metadata():
     if os.path.exists(SKILL_METADATA_FILE):
         with open(SKILL_METADATA_FILE, "r") as f:
@@ -231,8 +228,7 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
     global code_model, code_tokenizer, coder_loaded
     pipeline_put(f"\n[MULTI-AGENT BOOT] Task received: {current_prompt}")
     pipeline_put("[CODE BRAIN] Booting Collaborative Design Council + Hostile QA Pipeline...")
- 
-    # 1. JIT-load Qwen2.5-Coder
+
     load_auditor()
  
     is_success = False
@@ -434,16 +430,13 @@ def generate_and_save_skill(current_prompt, synthesized_context, collection, pip
     finally:
         pipeline_put("\n   -> [SYSTEM] Initiating Qwen 3B VRAM Flush...")
         
-        # 1. Record VRAM before deletion (if CUDA is available)
         vram_before = torch.cuda.memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else 0
-        
-        # 2. Delete components
+
         if 'code_model' in globals() and code_model is not None:
             del code_model
         if 'code_tokenizer' in globals() and code_tokenizer is not None:
             del code_tokenizer
         
-        # 3. Force garbage collection
         gc.collect()
         
         if torch.cuda.is_available():
